@@ -72,7 +72,9 @@ export function assertReferenceRow(
   const table = loadWeightTable();
   const want = comboFingerprint(combination);
   const row = table.find(
-    (r) => nearlyEqual(r.multiplier, multiplier) && comboFingerprint(r.combination) === want,
+    (r) =>
+      nearlyEqual(r.multiplier, multiplier) &&
+      comboFingerprint(r.combination) === want,
   );
   if (!row) {
     throw new BadRequestException(
@@ -81,7 +83,9 @@ export function assertReferenceRow(
   }
   const expectedTier = deriveWinTier(multiplier);
   if (row.win_tier !== expectedTier) {
-    throw new BadRequestException('reference row win_tier mismatch for multiplier');
+    throw new BadRequestException(
+      'reference row win_tier mismatch for multiplier',
+    );
   }
   return {
     winTier: row.win_tier,

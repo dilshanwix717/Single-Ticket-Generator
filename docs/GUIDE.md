@@ -20,14 +20,14 @@ If any generation rule fails, the engine **retries up to 10 times** with a fresh
 
 ## Tech stack
 
-| Piece        | Technology                          |
-|-------------|--------------------------------------|
-| Framework   | NestJS                               |
-| Language    | TypeScript (strict)                  |
-| HTTP        | `@nestjs/platform-express`         |
-| Database    | PostgreSQL                           |
-| ORM         | TypeORM                              |
-| Validation  | `class-validator` + `ValidationPipe` |
+| Piece      | Technology                           |
+| ---------- | ------------------------------------ |
+| Framework  | NestJS                               |
+| Language   | TypeScript (strict)                  |
+| HTTP       | `@nestjs/platform-express`           |
+| Database   | PostgreSQL                           |
+| ORM        | TypeORM                              |
+| Validation | `class-validator` + `ValidationPipe` |
 
 ---
 
@@ -106,21 +106,21 @@ sequenceDiagram
 
 ### Endpoint
 
-| Method | Path                 | Description        |
-|--------|----------------------|--------------------|
-| `POST` | `/tickets/generate`  | Create one ticket  |
+| Method | Path                | Description       |
+| ------ | ------------------- | ----------------- |
+| `POST` | `/tickets/generate` | Create one ticket |
 
 The app listens on **`PORT`** (default **3000**). There is no global prefix (e.g. no `/api`).
 
 ### Request body (`GenerateTicketDto`)
 
-| Field         | Type       | Required | Notes |
-|---------------|------------|----------|--------|
-| `player_id`   | string     | yes      | Stored on the ticket row. |
-| `bet_amount`  | number     | yes      | Must be **> 0**. |
-| `multiplier`  | number     | yes      | Must be **≥ 0**. |
-| `combination` | number[]   | yes      | Must be **empty** if `multiplier === 0`, else **non-empty**. |
-| `bet_tier`    | number     | no       | Accepted if sent; not persisted in the current schema. |
+| Field         | Type     | Required | Notes                                                        |
+| ------------- | -------- | -------- | ------------------------------------------------------------ |
+| `player_id`   | string   | yes      | Stored on the ticket row.                                    |
+| `bet_amount`  | number   | yes      | Must be **> 0**.                                             |
+| `multiplier`  | number   | yes      | Must be **≥ 0**.                                             |
+| `combination` | number[] | yes      | Must be **empty** if `multiplier === 0`, else **non-empty**. |
+| `bet_tier`    | number   | no       | Accepted if sent; not persisted in the current schema.       |
 
 Extra properties in the JSON body are **rejected** (`forbidNonWhitelisted: true` on `ValidationPipe`).
 
@@ -172,11 +172,11 @@ curl -s -X POST http://localhost:3000/tickets/generate \
 
 ### Common HTTP status codes
 
-| Status | Meaning |
-|--------|---------|
-| `200` | Success. (This handler does not set `@HttpCode(201)`, so Nest uses the default **200** for `POST`.) |
-| `400` | Validation failed (`class-validator`) or **reference** validation (`BadRequestException`: bad sum, unknown multiplier/combination pair, etc.). |
-| `503` | Generation failed after **10** full attempts (`ServiceUnavailableException`). |
+| Status | Meaning                                                                                                                                        |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `200`  | Success. (This handler does not set `@HttpCode(201)`, so Nest uses the default **200** for `POST`.)                                            |
+| `400`  | Validation failed (`class-validator`) or **reference** validation (`BadRequestException`: bad sum, unknown multiplier/combination pair, etc.). |
+| `503`  | Generation failed after **10** full attempts (`ServiceUnavailableException`).                                                                  |
 
 ---
 
@@ -229,7 +229,7 @@ So: **no ticket is returned until all checks pass**.
 - **Near-miss**: pick **3–4** W values as sources; for each, candidate values are:
   - `W === "00"` → only `"01"`
   - `W === "99"` → only `"98"`
-  - else → **`W−1`** and **`W+1`** as two-digit strings  
+  - else → **`W−1`** and **`W+1`** as two-digit strings
 - Choose **4–8** near-miss **positions** and assign **unique** near-miss values (never equal to any **W**, never duplicated in **Y**).
 - Fill remaining cells with random unused labels disjoint from **W** and from already used **Y** values.
 
@@ -292,23 +292,23 @@ Full stack (app + db) is still: `docker compose up --build`.
 
 ## Glossary
 
-| Term              | Meaning here |
-|-------------------|--------------|
-| **W numbers**     | Five “winning line” numbers shown on the ticket. |
-| **Y numbers**     | Twenty scratch cells; subset may match W on wins. |
-| **Near-miss**     | On a loss, some Y values are adjacent (±1) to chosen W values, not equal to W. |
-| **Hit count**     | Length of `combination`; number of winning matches on Y for wins. |
-| **Weight table**  | Authoritative list of legal `multiplier` + `combination` pairs. |
+| Term             | Meaning here                                                                   |
+| ---------------- | ------------------------------------------------------------------------------ |
+| **W numbers**    | Five “winning line” numbers shown on the ticket.                               |
+| **Y numbers**    | Twenty scratch cells; subset may match W on wins.                              |
+| **Near-miss**    | On a loss, some Y values are adjacent (±1) to chosen W values, not equal to W. |
+| **Hit count**    | Length of `combination`; number of winning matches on Y for wins.              |
+| **Weight table** | Authoritative list of legal `multiplier` + `combination` pairs.                |
 
 ---
 
 ## Related files outside `src/`
 
-| File                 | Purpose |
-|----------------------|---------|
-| `docker-compose.yml` | Postgres + optional app container |
+| File                 | Purpose                                 |
+| -------------------- | --------------------------------------- |
+| `docker-compose.yml` | Postgres + optional app container       |
 | `Dockerfile`         | Production-style Node image for the API |
-| `.env.example`       | Environment variable template |
-| `docs/GUIDE.md`      | This document |
+| `.env.example`       | Environment variable template           |
+| `docs/GUIDE.md`      | This document                           |
 
 If something in behavior and this guide disagree, **the TypeScript implementation is the source of truth**; consider updating this file when rules change.

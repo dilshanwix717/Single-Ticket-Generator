@@ -8,18 +8,18 @@ NestJS microservice that generates **exactly one scratch ticket per request**: i
 
 ## Stack
 
-- **Runtime:** Node.js  
-- **Framework:** NestJS, TypeScript (strict)  
-- **Database:** PostgreSQL  
-- **ORM:** TypeORM  
-- **Validation:** `class-validator` + global `ValidationPipe`  
+- **Runtime:** Node.js
+- **Framework:** NestJS, TypeScript (strict)
+- **Database:** PostgreSQL
+- **ORM:** TypeORM
+- **Validation:** `class-validator` + global `ValidationPipe`
 
 ---
 
 ## Prerequisites
 
-- Node.js 20+ (recommended; matches the `Dockerfile`)  
-- PostgreSQL 16+ (or Docker — see below)  
+- Node.js 20+ (recommended; matches the `Dockerfile`)
+- PostgreSQL 16+ (or Docker — see below)
 
 ---
 
@@ -64,8 +64,8 @@ Use `DATABASE_HOST=localhost` in `.env` with the same user, password, and databa
 
 ## API
 
-| Method | Path | Description |
-|--------|------|-------------|
+| Method | Path                | Description                   |
+| ------ | ------------------- | ----------------------------- |
 | `POST` | `/tickets/generate` | Generate and store one ticket |
 
 ### Example: losing ticket (`NO_WIN`)
@@ -90,26 +90,26 @@ See [docs/GUIDE.md](docs/GUIDE.md) for the full request/response contract, statu
 
 ## NPM scripts
 
-| Script | Purpose |
-|--------|---------|
-| `npm run start:dev` | Development with reload |
-| `npm run build` | Compile to `dist/` |
-| `npm run start:prod` | Run compiled app (`node dist/main`) |
-| `npm run test` | Unit tests (none required by default) |
-| `npm run test:e2e` | E2E smoke (mocked service) |
-| `npm run lint` | ESLint |
+| Script               | Purpose                               |
+| -------------------- | ------------------------------------- |
+| `npm run start:dev`  | Development with reload               |
+| `npm run build`      | Compile to `dist/`                    |
+| `npm run start:prod` | Run compiled app (`node dist/main`)   |
+| `npm run test`       | Unit tests (none required by default) |
+| `npm run test:e2e`   | E2E smoke (mocked service)            |
+| `npm run lint`       | ESLint                                |
 
 ---
 
 ## Project layout (short)
 
-| Path | Role |
-|------|------|
-| `src/tickets/` | Controller, service, DTO, entity, engines |
-| `src/tickets/data/weight-table.json` | Allowed multiplier + combination pairs |
-| `src/tickets/engine/` | Scratch grid, amounts, checksum, orchestration |
-| `src/config/database.config.ts` | TypeORM connection from env |
-| `docs/GUIDE.md` | Developer guide for beginners |
+| Path                                 | Role                                           |
+| ------------------------------------ | ---------------------------------------------- |
+| `src/tickets/`                       | Controller, service, DTO, entity, engines      |
+| `src/tickets/data/weight-table.json` | Allowed multiplier + combination pairs         |
+| `src/tickets/engine/`                | Scratch grid, amounts, checksum, orchestration |
+| `src/config/database.config.ts`      | TypeORM connection from env                    |
+| `docs/GUIDE.md`                      | Developer guide for beginners                  |
 
 ---
 

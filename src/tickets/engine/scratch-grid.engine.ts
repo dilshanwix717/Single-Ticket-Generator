@@ -1,4 +1,8 @@
-import { shuffleInPlace, randomIntInclusive, sampleDistinctIndices } from '../utils/random.utils';
+import {
+  shuffleInPlace,
+  randomIntInclusive,
+  sampleDistinctIndices,
+} from '../utils/random.utils';
 
 /**
  * Scratch grid (W area + Y area + near-miss)
@@ -177,7 +181,10 @@ export interface ScratchBuild {
  * Top-level attempt for one W draw: builds W and Y according to win/loss mode.
  * Returns null if this W could not be completed (caller may regenerate W).
  */
-export function tryBuildScratchGrid(hitCount: number, isLoss: boolean): ScratchBuild | null {
+export function tryBuildScratchGrid(
+  hitCount: number,
+  isLoss: boolean,
+): ScratchBuild | null {
   const w = drawDistinctWNumbers();
   if (isLoss) {
     const built = tryBuildLosingYWithNearMiss(w);

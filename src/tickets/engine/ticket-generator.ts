@@ -1,9 +1,9 @@
 import { ulid } from 'ulid';
-import { assertAmountLayoutValid, buildAmountLayout } from './amount-layout.engine';
 import {
-  assertScratchValid,
-  tryBuildScratchGrid,
-} from './scratch-grid.engine';
+  assertAmountLayoutValid,
+  buildAmountLayout,
+} from './amount-layout.engine';
+import { assertScratchValid, tryBuildScratchGrid } from './scratch-grid.engine';
 import { buildTicketNo } from './ticket-checksum';
 
 export const MAX_GENERATION_ATTEMPTS = 10;

@@ -158,18 +158,28 @@ function assertTierBand(
 }
 
 /** Verifies pool quotas, jackpot two-denom rule, and per-tier distinct counts. */
-export function assertAmountLayoutValid(amounts: number[], tiers: AmountTier[]): void {
+export function assertAmountLayoutValid(
+  amounts: number[],
+  tiers: AmountTier[],
+): void {
   if (amounts.length !== 20 || tiers.length !== 20) {
     throw new Error('amount layout must be length 20');
   }
   const count = (t: AmountTier) => tiers.filter((x) => x === t).length;
-  if (count('Low') !== 4 || count('Medium') !== 4 || count('High') !== 6 || count('Jackpot') !== 6) {
+  if (
+    count('Low') !== 4 ||
+    count('Medium') !== 4 ||
+    count('High') !== 6 ||
+    count('Jackpot') !== 6
+  ) {
     throw new Error('tier cell distribution invalid');
   }
 
   const jackpotVals = amounts.filter((_, i) => tiers[i] === 'Jackpot');
   if (new Set(jackpotVals).size !== 2) {
-    throw new Error('Jackpot tier must contain exactly two distinct denominations');
+    throw new Error(
+      'Jackpot tier must contain exactly two distinct denominations',
+    );
   }
   for (const v of jackpotVals) {
     if (!JACKPOT_POOL.includes(v)) {
