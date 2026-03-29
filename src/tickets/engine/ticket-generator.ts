@@ -1,12 +1,7 @@
 import { ulid } from 'ulid';
-import {
-  assertAmountLayoutValid,
-  buildAmountLayout,
-} from './amount-layout.engine';
-import { assertScratchValid, tryBuildScratchGrid } from './scratch-grid.engine';
+import { assertAmountLayoutValid, buildAmountLayout } from './amount-layout.engine';
+import { assertScratchValid, buildScratchGrid } from './scratch-grid.engine';
 import { buildTicketNo } from './ticket-checksum';
-
-export const MAX_GENERATION_ATTEMPTS = 10;
 
 export interface StoredAmountLayout {
   amounts: number[];
@@ -20,49 +15,62 @@ export interface GeneratedTicketLayout {
   amount_layout: StoredAmountLayout;
 }
 
+// /** Returns the indices in `y` that match any value in `w`. */
+// function findHitPositions(w: string[], y: string[]): number[] {
+//   const wSet = new Set(w);
+//   const positions: number[] = [];
+//   for (let i = 0; i < y.length; i++) {
+//     if (wSet.has(y[i]!)) positions.push(i);
+//   }
+//   return positions;
+// }
+
 /**
- * Orchestrates W/Y (plus optional near-miss) and the amount grid with bounded retries.
- * Any rule violation triggers a full regeneration attempt (new W draw, etc.).
+ * generateTicketLayout
+ * --------------------
+ * Generates one complete, fully validated scratch ticket layout.
+ *
+ * @param hitCount    - How many Y cells match a W number (0 = loss)
+ * @param isLoss      - true = losing ticket
+ * @param combination - Winning combination amounts (e.g. [1.5, 1.5, 2]).
+ *                      Must have exactly hitCount elements for winning tickets.
+ *                      Pass [] for losing tickets.
  */
 export function generateTicketLayout(
   hitCount: number,
   isLoss: boolean,
+  hitAmounts: number[] = [],
 ): GeneratedTicketLayout {
-  let lastErr: Error | null = null;
-  for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
-    const scratch = tryBuildScratchGrid(hitCount, isLoss);
-    if (!scratch) {
-      lastErr = new Error('scratch grid could not be built for this attempt');
-      continue;
-    }
-    try {
-      const { amounts, tiers } = buildAmountLayout(scratch.nearMissPositions);
-      assertScratchValid(
-        scratch.w,
-        scratch.y,
-        scratch.nearMissPositions,
-        hitCount,
-        isLoss,
-      );
-      assertAmountLayoutValid(amounts, tiers);
-      return {
-        w_numbers: scratch.w,
-        y_numbers: scratch.y,
-        near_miss_positions: scratch.nearMissPositions,
-        amount_layout: { amounts, tiers },
-      };
-    } catch (err) {
-      lastErr = err instanceof Error ? err : new Error(String(err));
-    }
+  const scratch = buildScratchGrid(hitCount, isLoss);
+
+  assertScratchValid(scratch.w, scratch.y, scratch.nearMissPositions, hitCount, isLoss);
+
+  const wSet = new Set(scratch.w);
+  const hitPositions: number[] = [];
+  for (let i = 0; i < scratch.y.length; i++) {
+    if (wSet.has(scratch.y[i]!)) hitPositions.push(i);
   }
-  throw lastErr ?? new Error('ticket generation exhausted retries');
+
+  const { amounts, tiers } = buildAmountLayout({
+    hitPositions,
+    hitAmounts,
+    nearMissPositions: scratch.nearMissPositions,
+  });
+
+  assertAmountLayoutValid(amounts, tiers);
+
+  return {
+    w_numbers: scratch.w,
+    y_numbers: scratch.y,
+    near_miss_positions: scratch.nearMissPositions,
+    amount_layout: { amounts, tiers },
+  };
 }
 
 export function newTicketId(): string {
   return ulid();
 }
 
-/** Public ticket number: NO.YYYYMMDD-{ULID}-{mod97} (UTC date). */
 export function formatTicketNumber(ulidStr: string): string {
   const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   return buildTicketNo(ymd, ulidStr);

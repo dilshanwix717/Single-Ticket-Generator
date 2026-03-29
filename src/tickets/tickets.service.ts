@@ -1,4 +1,4 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Ticket } from './entities/ticket.entity';
@@ -9,12 +9,7 @@ import {
   assertReferenceRow,
 } from './validation/reference.validator';
 import { roundMoney } from './validation/numeric.utils';
-import {
-  formatTicketNumber,
-  generateTicketLayout,
-  MAX_GENERATION_ATTEMPTS,
-  newTicketId,
-} from './engine/ticket-generator';
+import { formatTicketNumber, generateTicketLayout, newTicketId } from './engine/ticket-generator';
 
 export interface TicketResponse {
   ticket_no: string;
@@ -39,26 +34,13 @@ export class TicketsService {
    * bounded retries → assign ULID id + `ticket_no` → persist JSONB layouts → return DTO.
    */
   async generate(dto: GenerateTicketDto): Promise<TicketResponse> {
-    assertBasicCombinationRules(
-      dto.multiplier,
-      dto.bet_amount,
-      dto.combination,
-    );
-    const { winTier, hitCount } = assertReferenceRow(
-      dto.multiplier,
-      dto.combination,
-    );
+    assertBasicCombinationRules(dto.multiplier, dto.bet_amount, dto.combination);
+    const { winTier, hitCount } = assertReferenceRow(dto.multiplier, dto.combination);
     const payout = assertPayout(dto.multiplier, dto.bet_amount);
     const isLoss = dto.multiplier === 0;
 
-    let layout;
-    try {
-      layout = generateTicketLayout(hitCount, isLoss);
-    } catch {
-      throw new ServiceUnavailableException(
-        `Ticket generation failed after ${MAX_GENERATION_ATTEMPTS} attempts`,
-      );
-    }
+    const hitAmounts = isLoss ? [] : dto.combination.map(roundMoney);
+    const layout = generateTicketLayout(hitCount, isLoss, hitAmounts);
 
     const id = newTicketId();
     const ticketNo = formatTicketNumber(id);

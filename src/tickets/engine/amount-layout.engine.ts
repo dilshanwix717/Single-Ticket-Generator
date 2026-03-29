@@ -2,14 +2,18 @@ import type { AmountTier } from '../types/win-tier';
 import { shuffleInPlace, randomIntInclusive } from '../utils/random.utils';
 
 /**
- * Amount layout (20 prize cells)
- * ------------------------------
- * We first build the correct *multiset* of amounts per band (Low/Medium/High/Jackpot),
- * respecting how many distinct denominations each band may use. Jackpot always uses both
- * pool values across its six cells. Then we place amounts onto the 20 positions: near-miss
- * indices (only on losing tickets) receive the high-priority bands first (Jackpot, High,
- * Medium, Low), two slots each when available. Remaining positions consume the leftover
- * multiset in random order. The final `amounts` array is the persisted playfield order.
+ * ============================================================
+ *  AMOUNT LAYOUT ENGINE  (optimized)
+ * ============================================================
+ * Assigns prize dollar amounts to all 20 Y cells.
+ *
+ * Tier allocations:
+ *   Low     4 cells  •  Medium  4 cells
+ *   High    6 cells  •  Jackpot 6 cells  =  20 total
+ *
+ * For winning tickets, hit positions are pre-pinned to the exact
+ * combination values before the random pool fills remaining cells.
+ * ============================================================
  */
 
 const LOW_POOL = [1.5, 2, 2.5, 3, 4];
@@ -22,116 +26,140 @@ export interface AmountTaggedCell {
   tier: AmountTier;
 }
 
-function pickDistinctFromPool(pool: number[], count: number): number[] {
-  if (count > pool.length) {
-    throw new Error('pool too small for distinct pick');
-  }
+// ─────────────────────────────────────────────────────────────
+// TIER CLASSIFIER
+// ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// POOL BUILDERS
+// ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// NEAR-MISS PRIORITY PLACEMENT
+// ─────────────────────────────────────────────────────────────
+
+function inferTierForAmount(value: number): AmountTier {
+  if (LOW_POOL.includes(value)) return 'Low';
+  if (MED_POOL.includes(value)) return 'Medium';
+  if (HIGH_POOL.includes(value)) return 'High';
+  if (JACKPOT_POOL.includes(value)) return 'Jackpot';
+  throw new Error(`Unsupported amount: ${value}`);
+}
+
+function buildRandomTierCells(tier: AmountTier, pool: number[], cells: number): AmountTaggedCell[] {
+  if (cells <= 0) return [];
+
   const copy = [...pool];
   shuffleInPlace(copy);
-  return copy.slice(0, count);
-}
 
-/**
- * Low / Medium / High: pick 2–4 distinct denominations from the pool, then fill the
- * required number of cells using those denominations (duplicates allowed).
- */
-function buildTierMultiset(
-  tier: AmountTier,
-  pool: number[],
-  cells: number,
-  minDistinct: number,
-  maxDistinct: number,
-): AmountTaggedCell[] {
-  const d = randomIntInclusive(minDistinct, maxDistinct);
-  const denoms = pickDistinctFromPool(pool, d);
-  const out: AmountTaggedCell[] = [];
+  const maxDistinct = Math.min(pool.length, cells, tier === 'Jackpot' ? 2 : 4);
+  const minDistinct = Math.min(2, maxDistinct);
+  const distinctCount = randomIntInclusive(minDistinct, maxDistinct);
+  const denoms = copy.slice(0, distinctCount);
+
+  const out: AmountTaggedCell[] = new Array(cells);
   for (let i = 0; i < cells; i++) {
-    const v = denoms[randomIntInclusive(0, denoms.length - 1)]!;
-    out.push({ value: v, tier });
+    out[i] = { value: denoms[randomIntInclusive(0, denoms.length - 1)]!, tier };
   }
   return out;
 }
 
-/**
- * Jackpot tier always uses exactly the two pool values across six cells (duplicates OK).
- */
-function buildJackpotMultiset(): AmountTaggedCell[] {
-  const out: AmountTaggedCell[] = [];
-  for (let i = 0; i < 6; i++) {
-    const v = JACKPOT_POOL[randomIntInclusive(0, JACKPOT_POOL.length - 1)]!;
-    out.push({ value: v, tier: 'Jackpot' });
-  }
-  return out;
-}
-
-function removeFirstOfTier(
-  remaining: AmountTaggedCell[],
-  tier: AmountTier,
-): AmountTaggedCell | undefined {
-  const idx = remaining.findIndex((c) => c.tier === tier);
+function takeFirstOfTier(pool: AmountTaggedCell[], tier: AmountTier): AmountTaggedCell | undefined {
+  const idx = pool.findIndex((c) => c.tier === tier);
   if (idx === -1) return undefined;
-  const [cell] = remaining.splice(idx, 1);
-  return cell;
+  return pool.splice(idx, 1)[0];
 }
 
-/**
- * Merges tier multisets, then places values on the grid. Near-miss indices are filled
- * first using the priority ladder (two Jackpot slots, two High, …) when possible.
- */
-export function buildAmountLayout(nmPositions: number[]): {
+// ─────────────────────────────────────────────────────────────
+// PUBLIC API
+// ─────────────────────────────────────────────────────────────
+
+export function buildAmountLayout(input: {
+  hitPositions: number[];
+  hitAmounts: number[];
+  nearMissPositions: number[];
+}): {
   amounts: number[];
   tiers: AmountTier[];
 } {
-  const low = buildTierMultiset('Low', LOW_POOL, 4, 2, 4);
-  const med = buildTierMultiset('Medium', MED_POOL, 4, 2, 4);
-  const high = buildTierMultiset('High', HIGH_POOL, 6, 2, 4);
-  const jack = buildJackpotMultiset();
-  const all: AmountTaggedCell[] = [...low, ...med, ...high, ...jack];
-  if (all.length !== 20) {
-    throw new Error('internal: amount multiset must be length 20');
+  const { hitPositions, hitAmounts, nearMissPositions } = input;
+
+  if (hitPositions.length !== hitAmounts.length) {
+    throw new Error('hitPositions and hitAmounts must have the same length');
   }
 
-  const remaining = [...all];
-  shuffleInPlace(remaining);
+  const hitByTier: Record<AmountTier, AmountTaggedCell[]> = {
+    Low: [],
+    Medium: [],
+    High: [],
+    Jackpot: [],
+  };
 
-  const grid: (AmountTaggedCell | null)[] = Array(20).fill(null);
+  for (const amt of hitAmounts) {
+    const tier = inferTierForAmount(amt);
+    hitByTier[tier].push({ value: amt, tier });
+  }
 
+  const tierSpecs = [
+    { tier: 'Low' as const, pool: LOW_POOL, total: 4 },
+    { tier: 'Medium' as const, pool: MED_POOL, total: 4 },
+    { tier: 'High' as const, pool: HIGH_POOL, total: 6 },
+    { tier: 'Jackpot' as const, pool: JACKPOT_POOL, total: 6 },
+  ];
+
+  // Build the non-hit cells, keeping the same total tier distribution.
+  const remaining: AmountTaggedCell[] = [];
+  for (const spec of tierSpecs) {
+    const hitCount = hitByTier[spec.tier].length;
+    if (hitCount > spec.total) {
+      throw new Error(`Too many hit amounts for tier ${spec.tier}`);
+    }
+    remaining.push(...buildRandomTierCells(spec.tier, spec.pool, spec.total - hitCount));
+  }
+
+  const grid = new Array<AmountTaggedCell | null>(20).fill(null);
+
+  // Put the actual payout amounts on the hit positions.
+  const orderedHitPositions = [...hitPositions].sort((a, b) => a - b);
+  for (let i = 0; i < orderedHitPositions.length; i++) {
+    const amt = hitAmounts[i]!;
+    grid[orderedHitPositions[i]!] = { value: amt, tier: inferTierForAmount(amt) };
+  }
+
+  // Near-miss positions should get the best remaining values first.
   const priority: AmountTier[] = ['Jackpot', 'High', 'Medium', 'Low'];
-  const nmOrder = [...nmPositions];
+  const nmOrder = [...nearMissPositions];
   shuffleInPlace(nmOrder);
 
   let nmCursor = 0;
   for (const tier of priority) {
     for (let k = 0; k < 2 && nmCursor < nmOrder.length; k++) {
-      const cell = removeFirstOfTier(remaining, tier);
-      if (!cell) {
-        continue;
-      }
-      const pos = nmOrder[nmCursor++]!;
-      grid[pos] = cell;
+      const cell = takeFirstOfTier(remaining, tier);
+      if (!cell) continue;
+      grid[nmOrder[nmCursor++]!] = cell;
     }
   }
 
-  const empty: number[] = [];
+  // Fill everything else.
+  const emptyPositions: number[] = [];
   for (let i = 0; i < 20; i++) {
-    if (grid[i] == null) {
-      empty.push(i);
-    }
-  }
-  shuffleInPlace(empty);
-  shuffleInPlace(remaining);
-  for (const i of empty) {
-    const cell = remaining.pop();
-    if (!cell) {
-      throw new Error('internal: amount assignment underflow');
-    }
-    grid[i] = cell;
+    if (grid[i] === null) emptyPositions.push(i);
   }
 
-  const amounts = grid.map((c) => c!.value);
-  const tiers = grid.map((c) => c!.tier);
-  return { amounts, tiers };
+  shuffleInPlace(emptyPositions);
+  for (let i = 0; i < emptyPositions.length; i++) {
+    grid[emptyPositions[i]!] = remaining[i]!;
+  }
+
+  return {
+    amounts: grid.map((c) => c!.value),
+    tiers: grid.map((c) => c!.tier) as AmountTier[],
+  };
 }
+
+// ─────────────────────────────────────────────────────────────
+// VALIDATION
+// ─────────────────────────────────────────────────────────────
 
 function assertTierBand(
   amounts: number[],
@@ -143,51 +171,50 @@ function assertTierBand(
   maxDistinct: number,
 ): void {
   const vals = amounts.filter((_, i) => tiers[i] === tier);
-  if (vals.length !== cellCount) {
-    throw new Error(`${tier} tier cell count invalid`);
-  }
+  if (vals.length !== cellCount) throw new Error(`${tier} cell count invalid`);
   const distinct = new Set(vals).size;
-  if (distinct < minDistinct || distinct > maxDistinct) {
+  if (distinct < minDistinct || distinct > maxDistinct)
     throw new Error(`${tier} distinct denomination count invalid`);
-  }
   for (const v of vals) {
-    if (!pool.includes(v)) {
-      throw new Error(`${tier} value outside pool`);
-    }
+    if (!pool.includes(v)) throw new Error(`${tier} value outside pool`);
   }
 }
 
-/** Verifies pool quotas, jackpot two-denom rule, and per-tier distinct counts. */
-export function assertAmountLayoutValid(
-  amounts: number[],
-  tiers: AmountTier[],
-): void {
-  if (amounts.length !== 20 || tiers.length !== 20) {
-    throw new Error('amount layout must be length 20');
-  }
-  const count = (t: AmountTier) => tiers.filter((x) => x === t).length;
-  if (
-    count('Low') !== 4 ||
-    count('Medium') !== 4 ||
-    count('High') !== 6 ||
-    count('Jackpot') !== 6
-  ) {
-    throw new Error('tier cell distribution invalid');
+/**
+ * assertAmountLayoutValid
+ * -----------------------
+ * For losing tickets (hitCount === 0) the full tier distribution is
+ * validated strictly (4 Low, 4 Medium, 6 High, 6 Jackpot).
+ *
+ * For winning tickets the hit cells carry combination values that
+ * displace pool entries, so strict tier counts no longer apply —
+ * only overall length and slot completeness are checked.
+ */
+export function assertAmountLayoutValid(amounts: number[], tiers: AmountTier[], hitCount = 0): void {
+  if (amounts.length !== 20 || tiers.length !== 20) throw new Error('amount layout must be length 20');
+
+  // Every slot must be populated regardless of ticket type
+  for (let i = 0; i < 20; i++) {
+    if (amounts[i] === undefined || amounts[i] === null) throw new Error(`amount at index ${i} is missing`);
   }
 
-  const jackpotVals = amounts.filter((_, i) => tiers[i] === 'Jackpot');
-  if (new Set(jackpotVals).size !== 2) {
-    throw new Error(
-      'Jackpot tier must contain exactly two distinct denominations',
-    );
-  }
-  for (const v of jackpotVals) {
-    if (!JACKPOT_POOL.includes(v)) {
-      throw new Error('Jackpot value not from pool');
+  if (hitCount === 0) {
+    // Losing ticket — enforce strict tier distribution
+    const count = (t: AmountTier) => tiers.filter((x) => x === t).length;
+    if (count('Low') !== 4 || count('Medium') !== 4 || count('High') !== 6 || count('Jackpot') !== 6)
+      throw new Error('tier cell distribution invalid');
+
+    const jackpotVals = amounts.filter((_, i) => tiers[i] === 'Jackpot');
+    if (new Set(jackpotVals).size !== 2)
+      throw new Error('Jackpot must contain exactly two distinct denominations');
+    for (const v of jackpotVals) {
+      if (!JACKPOT_POOL.includes(v)) throw new Error('Jackpot value not from pool');
     }
-  }
 
-  assertTierBand(amounts, tiers, 'Low', LOW_POOL, 4, 2, 4);
-  assertTierBand(amounts, tiers, 'Medium', MED_POOL, 4, 2, 4);
-  assertTierBand(amounts, tiers, 'High', HIGH_POOL, 6, 2, 4);
+    assertTierBand(amounts, tiers, 'Low', LOW_POOL, 4, 2, 4);
+    assertTierBand(amounts, tiers, 'Medium', MED_POOL, 4, 2, 4);
+    assertTierBand(amounts, tiers, 'High', HIGH_POOL, 6, 2, 4);
+  }
+  // Winning ticket: combination values occupy hit slots; tier counts will
+  // differ from the losing-ticket distribution — no strict check needed.
 }
