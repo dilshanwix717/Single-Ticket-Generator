@@ -3,7 +3,6 @@ import { loadWeightTable } from './weight-table';
 import {
   comboFingerprint,
   nearlyEqual,
-  roundMoney,
   sumCombination,
 } from './numeric.utils';
 import type { WinTier } from '../types/win-tier';
@@ -11,23 +10,17 @@ import type { WinTier } from '../types/win-tier';
 /**
  * Ticket validation (request + reference table)
  * ---------------------------------------------
- * The API trusts `multiplier` and `combination` from the client, but we still prove they
- * are internally consistent (sum, emptiness rules) and that they match one canonical
- * row in `weight-table.json`. That stops "invented" payouts that are not in the product
- * definition, even if someone tampers with the JSON body.
+ * The API trusts `combination` from the client, but we still prove it is
+ * internally consistent and matches one canonical row in `weight-table.json`.
  */
 
 /**
- * Validates request-level numeric rules (multiplier, bet, combination emptiness, sum).
+ * Validates request-level numeric rules (multiplier derived from combination).
  */
 export function assertBasicCombinationRules(
   multiplier: number,
-  betAmount: number,
   combination: number[],
 ): void {
-  if (betAmount <= 0) {
-    throw new BadRequestException('bet_amount must be > 0');
-  }
   if (multiplier < 0) {
     throw new BadRequestException('multiplier must be >= 0');
   }
@@ -49,8 +42,7 @@ export function assertBasicCombinationRules(
 }
 
 /**
- * Maps multiplier to the win tier labels from the product spec (tiers outside the
- * reference table are still classified this way for display).
+ * Maps multiplier to the win tier labels from the product spec.
  */
 export function deriveWinTier(multiplier: number): WinTier {
   if (multiplier === 0) return 'NO_WIN';
@@ -91,12 +83,4 @@ export function assertReferenceRow(
     winTier: row.win_tier,
     hitCount: combination.length,
   };
-}
-
-export function assertPayout(multiplier: number, betAmount: number): number {
-  const payout = roundMoney(multiplier * betAmount);
-  if (!Number.isFinite(payout)) {
-    throw new BadRequestException('invalid payout');
-  }
-  return payout;
 }

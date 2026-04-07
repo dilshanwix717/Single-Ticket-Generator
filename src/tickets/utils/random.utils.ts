@@ -12,8 +12,18 @@ export function shuffleInPlace<T>(arr: T[]): T[] {
   return arr;
 }
 
+/**
+ * sampleDistinctIndices
+ * ---------------------
+ * Returns `count` distinct random indices from [0, total).
+ * Uses partial Fisher-Yates — stops after `count` swaps instead of
+ * shuffling all `total` elements.  O(count) instead of O(total).
+ */
 export function sampleDistinctIndices(total: number, count: number): number[] {
   const idx = Array.from({ length: total }, (_, i) => i);
-  shuffleInPlace(idx);
+  for (let i = 0; i < count; i++) {
+    const j = i + randomIntInclusive(0, total - 1 - i);
+    [idx[i], idx[j]] = [idx[j]!, idx[i]!];
+  }
   return idx.slice(0, count).sort((a, b) => a - b);
 }

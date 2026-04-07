@@ -5,10 +5,9 @@ import { Ticket } from './entities/ticket.entity';
 import { GenerateTicketDto } from './dto/generate-ticket.dto';
 import {
   assertBasicCombinationRules,
-  assertPayout,
   assertReferenceRow,
 } from './validation/reference.validator';
-import { roundMoney } from './validation/numeric.utils';
+import { roundMoney, sumCombination } from './validation/numeric.utils';
 import { formatTicketNumber, generateTicketLayout, newTicketId } from './engine/ticket-generator';
 
 export interface TicketResponse {
@@ -16,7 +15,6 @@ export interface TicketResponse {
   multiplier: number;
   win_tier: string;
   hit_count: number;
-  payout: number;
   w_numbers: string[];
   y_numbers: string[];
   amount_layout: { amounts: number[] };
@@ -29,31 +27,24 @@ export class TicketsService {
     private readonly tickets: Repository<Ticket>,
   ) {}
 
-  /**
-   * End-to-end flow: validate → derive tier/payout → generate scratch + amounts with
-   * bounded retries → assign ULID id + `ticket_no` → persist JSONB layouts → return DTO.
-   */
   async generate(dto: GenerateTicketDto): Promise<TicketResponse> {
-    assertBasicCombinationRules(dto.multiplier, dto.bet_amount, dto.combination);
-    const { winTier, hitCount } = assertReferenceRow(dto.multiplier, dto.combination);
-    const payout = assertPayout(dto.multiplier, dto.bet_amount);
-    const isLoss = dto.multiplier === 0;
+    const multiplier = roundMoney(sumCombination(dto.combination));
+    assertBasicCombinationRules(multiplier, dto.combination);
+    const { winTier, hitCount } = assertReferenceRow(multiplier, dto.combination);
+    const isLoss = multiplier === 0;
 
     const hitAmounts = isLoss ? [] : dto.combination.map(roundMoney);
     const layout = generateTicketLayout(hitCount, isLoss, hitAmounts);
 
     const id = newTicketId();
-    const ticketNo = formatTicketNumber(id);
+    const ticketNo = formatTicketNumber();
 
     const row = this.tickets.create({
       id,
-      player_id: dto.player_id,
-      bet_amount: roundMoney(dto.bet_amount).toFixed(4),
-      multiplier: roundMoney(dto.multiplier).toFixed(4),
+      multiplier: roundMoney(multiplier).toFixed(4),
       combination: dto.combination.map(roundMoney),
       hit_count: hitCount,
       win_tier: winTier,
-      payout: roundMoney(payout).toFixed(4),
       w_numbers: layout.w_numbers,
       y_numbers: layout.y_numbers,
       near_miss_positions: layout.near_miss_positions,
@@ -65,10 +56,9 @@ export class TicketsService {
 
     return {
       ticket_no: row.ticket_no,
-      multiplier: dto.multiplier,
+      multiplier,
       win_tier: winTier,
       hit_count: hitCount,
-      payout,
       w_numbers: layout.w_numbers,
       y_numbers: layout.y_numbers,
       amount_layout: { amounts: layout.amount_layout.amounts },

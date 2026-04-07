@@ -1,5 +1,7 @@
 import { shuffleInPlace, randomIntInclusive, sampleDistinctIndices } from '../utils/random.utils';
 
+const DEBUG_TICKETS = process.env['DEBUG_TICKETS'] === '1';
+
 /**
  * ============================================================
  *  SCRATCH GRID ENGINE  (optimized)
@@ -16,7 +18,8 @@ import { shuffleInPlace, randomIntInclusive, sampleDistinctIndices } from '../ut
  *      try loop that was the main source of failures.
  *
  *   2. Y filling uses a pre-built forbidden boolean array (O(1)
- *      lookup) and a single shuffle — no per-cell iteration.
+ *      lookup) and partial Fisher-Yates — only as many swaps as
+ *      filler cells needed, not the full pool size.
  *
  *   3. Near-miss positions and values are committed in one pass;
  *      no safety re-check loop is needed because the algorithm is
@@ -64,25 +67,17 @@ export function nearMissCandidatesForW(w: string): string[] {
  *
  * Algorithm: reservoir-sample 5 numbers from a pool that has
  * already excluded the immediate neighbours of chosen numbers.
- *
- * Worst-case spread of 5 values in [0..99] with gap ≥ 2:
- *   e.g. 0, 2, 4, 6, 8 → 9 numbers consumed, 91 still free.
- * This is always satisfiable, so no loop guard is needed.
  */
 function drawSpreadWNumbers(): string[] {
-  // Build a pool of all 100 numbers, then iteratively pick one and
-  // remove its ±1 neighbours from the pool.
-  const available = new Uint8Array(100); // 1 = available
+  const available = new Uint8Array(100);
   available.fill(1);
 
   const picked: number[] = [];
 
   while (picked.length < W_COUNT) {
-    // Count available slots
     let count = 0;
     for (let i = 0; i < 100; i++) if (available[i]) count++;
 
-    // Pick a random index within the available set
     let skip = randomIntInclusive(0, count - 1);
     let chosen = -1;
     for (let i = 0; i < 100; i++) {
@@ -96,18 +91,19 @@ function drawSpreadWNumbers(): string[] {
     }
 
     picked.push(chosen);
-    console.log(
-      `[ScratchGrid] drawSpreadWNumbers — pick ${picked.length}/${W_COUNT}: raw=${chosen} → "${formatCell(chosen)}" (available before pick: ${count})`,
-    );
+    if (DEBUG_TICKETS) {
+      console.log(
+        `[ScratchGrid] drawSpreadWNumbers — pick ${picked.length}/${W_COUNT}: raw=${chosen} → "${formatCell(chosen)}" (available before pick: ${count})`,
+      );
+    }
 
-    // Mark chosen and its immediate neighbours as unavailable
     available[chosen] = 0;
     if (chosen > 0) available[chosen - 1] = 0;
     if (chosen < 99) available[chosen + 1] = 0;
   }
 
   const result = picked.map(formatCell);
-  console.log(`[ScratchGrid] drawSpreadWNumbers — final W (${W_COUNT} spread): [${result.join(', ')}]`);
+  if (DEBUG_TICKETS) console.log(`[ScratchGrid] drawSpreadWNumbers — final W (${W_COUNT} spread): [${result.join(', ')}]`);
   return result;
 }
 
@@ -119,8 +115,7 @@ function drawSpreadWNumbers(): string[] {
  * buildForbiddenMap
  * -----------------
  * Returns a Uint8Array[100] where index i is 1 if number i must not
- * appear in the remaining Y cells.  Accepts a list of string values
- * to forbid (W numbers + already-placed Y values).
+ * appear in the remaining Y cells.
  */
 function buildForbiddenMap(forbid: Iterable<string>): Uint8Array {
   const map = new Uint8Array(100);
@@ -131,76 +126,58 @@ function buildForbiddenMap(forbid: Iterable<string>): Uint8Array {
 /**
  * buildAllowedPool
  * ----------------
- * Converts a forbidden map into a shuffled array of allowed numeric
- * values.  One shuffle here is all we need — callers just pop/slice.
+ * Returns exactly `need` random values from the non-forbidden set [0–99].
+ * Uses partial Fisher-Yates — swaps only the first `need` positions
+ * instead of shuffling the entire pool.  O(need) instead of O(pool size).
  */
-function buildAllowedPool(forbidden: Uint8Array): number[] {
+function buildAllowedPool(forbidden: Uint8Array, need: number): number[] {
   const pool: number[] = [];
   for (let i = 0; i < 100; i++) if (!forbidden[i]) pool.push(i);
-  shuffleInPlace(pool);
-  return pool;
+  for (let i = 0; i < need; i++) {
+    const j = i + randomIntInclusive(0, pool.length - 1 - i);
+    [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+  }
+  return pool.slice(0, need);
 }
 
 // ─────────────────────────────────────────────────────────────
 // Y GRID: WINNING TICKET
 // ─────────────────────────────────────────────────────────────
 
-/**
- * buildWinningY
- * -------------
- * Builds a 20-cell Y grid for a winning ticket.
- *
- * Guarantees (by construction, validated downstream):
- *   • Exactly `hitCount` cells equal a W number.
- *   • Each matching cell uses a distinct W value.
- *   • All 20 values are globally unique.
- *   • No non-hit cell equals any W number.
- *
- * This function is always called with hitCount ≤ 5, so it can
- * never fail.  No return-null path exists.
- */
 function buildWinningY(w: string[], hitCount: number): string[] {
-  console.log(`[ScratchGrid] buildWinningY — start (${hitCount} hit(s), ${CELL_COUNT} cells)`);
+  if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildWinningY — start (${hitCount} hit(s), ${CELL_COUNT} cells)`);
 
-  // 1. Choose which W values become hits (shuffle W, take first hitCount)
   const hitValues = [...w];
   shuffleInPlace(hitValues);
   const chosenHits = hitValues.slice(0, hitCount);
-  console.log(`[ScratchGrid] buildWinningY — step 1: chosen W values for hits (order = placement order)`, chosenHits);
+  if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildWinningY — step 1: chosen W values for hits`, chosenHits);
 
-  // 2. Choose which grid positions the hits occupy
   const hitPositions = sampleDistinctIndices(CELL_COUNT, hitCount);
-  const hitPositionsSorted = [...hitPositions].sort((a, b) => a - b);
-  console.log(`[ScratchGrid] buildWinningY — step 2: hit cell indices (unsorted)`, hitPositions);
-  console.log(`[ScratchGrid] buildWinningY — step 2: hit cell indices (sorted)`, hitPositionsSorted);
+  if (DEBUG_TICKETS) {
+    console.log(`[ScratchGrid] buildWinningY — step 2: hit cell indices (sorted)`, [...hitPositions].sort((a, b) => a - b));
+  }
 
-  // 3. Place hits
   const grid = new Array<string>(CELL_COUNT);
-  const forbidden = buildForbiddenMap(w); // forbid ALL W numbers for fillers
+  const forbidden = buildForbiddenMap(w);
 
   for (let i = 0; i < hitCount; i++) {
     const pos = hitPositions[i]!;
     const val = chosenHits[i]!;
     grid[pos] = val;
-    console.log(`[ScratchGrid] buildWinningY — step 3: place hit ${i + 1}/${hitCount} → cell ${pos} = "${val}"`);
+    if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildWinningY — step 3: hit ${i + 1}/${hitCount} → cell ${pos} = "${val}"`);
   }
 
-  // 4. Build allowed pool (excludes all W numbers + already-placed hits)
-  //    Hits are W numbers so they're already forbidden; nothing extra needed.
-  const pool = buildAllowedPool(forbidden);
-  console.log(
-    `[ScratchGrid] buildWinningY — step 4: filler pool size=${pool.length} (excludes all ${W_COUNT} W numbers)`,
-  );
+  const fillerCount = CELL_COUNT - hitCount;
+  const pool = buildAllowedPool(forbidden, fillerCount);
+  if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildWinningY — step 4: filler pool size=${pool.length}`);
 
-  // 5. Fill remaining cells
   let poolIdx = 0;
   for (let i = 0; i < CELL_COUNT; i++) {
     if (grid[i] !== undefined) continue;
     grid[i] = formatCell(pool[poolIdx++]!);
   }
 
-  console.log(`[ScratchGrid] buildWinningY — step 5: Y grid complete`);
-  console.log(`[ScratchGrid] buildWinningY — Y: [${grid.join(', ')}]`);
+  if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildWinningY — Y: [${grid.join(', ')}]`);
   return grid;
 }
 
@@ -208,99 +185,68 @@ function buildWinningY(w: string[], hitCount: number): string[] {
 // Y GRID: LOSING TICKET  (near-miss guaranteed)
 // ─────────────────────────────────────────────────────────────
 
-/**
- * buildLosingYWithNearMiss
- * ------------------------
- * Builds a 20-cell Y grid for a losing ticket with guaranteed
- * near-miss cells.
- *
- * Because W numbers were drawn with a minimum spread of 2, every
- * W number has at least one ±1 neighbour that is NOT another W
- * number.  With 5 spread W numbers we always have ≥ 5 (and
- * typically 8–10) valid near-miss candidates — well above the
- * minimum of 4 required by the spec.
- *
- * Therefore this function is deterministic and never fails.
- *
- * Algorithm:
- *   1. Collect all ±1 candidates for 3–4 W numbers; deduplicate;
- *      remove any that happen to equal a W number.
- *   2. Pick nmTarget (4–8) values from that pool.
- *   3. Assign them to random positions.
- *   4. Fill the remaining 20 − nmTarget cells from the allowed pool.
- */
 function buildLosingYWithNearMiss(w: string[]): { y: string[]; nearMissPositions: number[] } {
-  console.log(`[ScratchGrid] buildLosingYWithNearMiss — start (${CELL_COUNT} cells, no Y=W)`);
+  if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildLosingYWithNearMiss — start`);
 
   const wSet = new Set(w);
   const wNums = w.map((v) => parseInt(v, 10));
 
-  // 1. Build near-miss candidate pool from 3–4 W numbers
   const wSubset = [...w];
   shuffleInPlace(wSubset);
-  const sources = wSubset.slice(0, 4); // always use 4 sources per spec §5.5.2
-  console.log(`[ScratchGrid] buildLosingYWithNearMiss — step 1: W sources for ±1 near-miss candidates`, sources);
+  const sourceCount = randomIntInclusive(3, 4);
+  const sources = wSubset.slice(0, sourceCount);
+  if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildLosingYWithNearMiss — W sources (${sourceCount})`, sources);
 
   const nmPool: string[] = [];
   for (const ws of sources) {
     const cands = nearMissCandidatesForW(ws);
-    console.log(`[ScratchGrid] buildLosingYWithNearMiss — step 1: W="${ws}" → ±1 candidates`, cands);
+    if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildLosingYWithNearMiss — W="${ws}" → ±1 candidates`, cands);
     for (const c of cands) {
       if (!wSet.has(c)) nmPool.push(c);
     }
   }
 
-  // Deduplicate
   const nmUniq = [...new Set(nmPool)];
-  console.log(
-    `[ScratchGrid] buildLosingYWithNearMiss — step 2: deduped near-miss pool (${nmUniq.length} values)`,
-    nmUniq,
-  );
+  if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildLosingYWithNearMiss — deduped near-miss pool (${nmUniq.length})`, nmUniq);
 
-  // nmUniq.length is always ≥ 4 because spread-W guarantees it.
-  // Clamp target to available pool (spec says 4–8).
   const nmTargetRaw = randomIntInclusive(4, 8);
   const nmTarget = Math.min(nmTargetRaw, nmUniq.length);
-  console.log(
-    `[ScratchGrid] buildLosingYWithNearMiss — step 3: target near-miss count: random ${nmTargetRaw} → applied ${nmTarget} (capped by pool)`,
-  );
+  if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildLosingYWithNearMiss — near-miss count: ${nmTargetRaw} → ${nmTarget}`);
+
   shuffleInPlace(nmUniq);
   const nmValues = nmUniq.slice(0, nmTarget);
-  console.log(`[ScratchGrid] buildLosingYWithNearMiss — step 3: chosen near-miss values (${nmValues.length})`, nmValues);
+  if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildLosingYWithNearMiss — chosen near-miss values`, nmValues);
 
-  // 2. Pick nmTarget random grid positions for near-miss cells
   const nmPositions = sampleDistinctIndices(CELL_COUNT, nmTarget).sort((a, b) => a - b);
-  console.log(`[ScratchGrid] buildLosingYWithNearMiss — step 4: near-miss cell indices (sorted)`, nmPositions);
+  if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildLosingYWithNearMiss — near-miss cell indices`, nmPositions);
 
-  // 3. Build grid
   const grid = new Array<string>(CELL_COUNT);
 
   for (let i = 0; i < nmTarget; i++) {
     const pos = nmPositions[i]!;
     const val = nmValues[i]!;
     grid[pos] = val;
-    console.log(`[ScratchGrid] buildLosingYWithNearMiss — step 5: place near-miss ${i + 1}/${nmTarget} → cell ${pos} = "${val}"`);
+    if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildLosingYWithNearMiss — near-miss ${i + 1}/${nmTarget}: cell ${pos} = "${val}"`);
   }
 
-  // 4. Forbidden: all W numbers + all placed near-miss values
   const forbidden = new Uint8Array(100);
   for (const n of wNums) forbidden[n] = 1;
   for (const v of nmValues) forbidden[parseInt(v, 10)] = 1;
 
-  const pool = buildAllowedPool(forbidden);
-  console.log(
-    `[ScratchGrid] buildLosingYWithNearMiss — step 6: filler pool size=${pool.length} (forbid W ∪ near-miss values)`,
-  );
-  let poolIdx = 0;
+  const fillerCount = CELL_COUNT - nmTarget;
+  const pool = buildAllowedPool(forbidden, fillerCount);
+  if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildLosingYWithNearMiss — filler pool size=${pool.length}`);
 
+  let poolIdx = 0;
   for (let i = 0; i < CELL_COUNT; i++) {
     if (grid[i] !== undefined) continue;
     grid[i] = formatCell(pool[poolIdx++]!);
   }
 
-  console.log(`[ScratchGrid] buildLosingYWithNearMiss — step 7: Y grid complete`);
-  console.log(`[ScratchGrid] buildLosingYWithNearMiss — Y: [${grid.join(', ')}]`);
-  console.log(`[ScratchGrid] buildLosingYWithNearMiss — near-miss positions: [${nmPositions.join(', ')}]`);
+  if (DEBUG_TICKETS) {
+    console.log(`[ScratchGrid] buildLosingYWithNearMiss — Y: [${grid.join(', ')}]`);
+    console.log(`[ScratchGrid] buildLosingYWithNearMiss — near-miss positions: [${nmPositions.join(', ')}]`);
+  }
 
   return { y: grid as string[], nearMissPositions: nmPositions };
 }
@@ -315,46 +261,29 @@ export interface ScratchBuild {
   nearMissPositions: number[];
 }
 
-/**
- * buildScratchGrid
- * ----------------
- * Builds one complete scratch grid.  Always succeeds — no null
- * return, no external retry loop required.
- *
- * @param hitCount - Y cells that must match a W number (0 = loss)
- * @param isLoss   - true = losing ticket
- */
 export function buildScratchGrid(hitCount: number, isLoss: boolean): ScratchBuild {
-  console.log(`\n${'='.repeat(60)}`);
-  console.log(`[ScratchGrid] buildScratchGrid — START mode=${isLoss ? 'LOSING' : 'WINNING'} hitCount=${hitCount}`);
+  if (DEBUG_TICKETS) {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`[ScratchGrid] buildScratchGrid — START mode=${isLoss ? 'LOSING' : 'WINNING'} hitCount=${hitCount}`);
+  }
 
-  console.log(`[ScratchGrid] phase A — drawSpreadWNumbers()`);
   const w = drawSpreadWNumbers();
 
   if (isLoss) {
-    console.log(`[ScratchGrid] phase B — buildLosingYWithNearMiss(w)`);
     const { y, nearMissPositions } = buildLosingYWithNearMiss(w);
-    console.log(`[ScratchGrid] buildScratchGrid — END (loss) nearMiss count=${nearMissPositions.length}`);
+    if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildScratchGrid — END (loss) nearMiss count=${nearMissPositions.length}`);
     return { w, y, nearMissPositions };
   }
 
-  console.log(`[ScratchGrid] phase B — buildWinningY(w, ${hitCount})`);
   const y = buildWinningY(w, hitCount);
-  console.log(`[ScratchGrid] buildScratchGrid — END (win) nearMissPositions=[]`);
+  if (DEBUG_TICKETS) console.log(`[ScratchGrid] buildScratchGrid — END (win)`);
   return { w, y, nearMissPositions: [] };
 }
 
 // ─────────────────────────────────────────────────────────────
-// VALIDATION  (dev/test safety net — should never throw in prod)
+// VALIDATION  (dev/CI safety net — skipped in production)
 // ─────────────────────────────────────────────────────────────
 
-/**
- * assertScratchValid
- * ------------------
- * Validates a finished scratch grid against all spec rules.
- * In production, this should never throw — it exists as a
- * correctness guard during development and CI.
- */
 export function assertScratchValid(
   w: string[],
   y: string[],
@@ -362,7 +291,6 @@ export function assertScratchValid(
   hitCount: number,
   isLoss: boolean,
 ): void {
-  console.log(`[ScratchGrid] assertScratchValid — checking (isLoss=${isLoss}, hitCount=${hitCount})`);
   if (new Set(w).size !== W_COUNT) throw new Error('W must be 5 unique values');
   if (y.length !== CELL_COUNT || new Set(y).size !== CELL_COUNT)
     throw new Error('Y must contain 20 globally unique values');
@@ -383,7 +311,6 @@ export function assertScratchValid(
       const ok = w.some((ws) => nearMissCandidatesForW(ws).includes(val));
       if (!ok) throw new Error('Near-miss value must be ±1 from some W');
     }
-    console.log(`[ScratchGrid] assertScratchValid — loss rules OK (Y∩W=∅, ${nearMissPositions.length} near-misses)`);
     return;
   }
 
@@ -391,5 +318,4 @@ export function assertScratchValid(
   if (hits.length !== hitCount) throw new Error('Winning ticket: wrong hit count');
   if (new Set(hits).size !== hitCount) throw new Error('Winning hits must use distinct W values');
   if (nearMissPositions.length !== 0) throw new Error('Near-miss only valid on losing tickets');
-  console.log(`[ScratchGrid] assertScratchValid — win rules OK (${hitCount} distinct hits, no near-miss rows)`);
 }

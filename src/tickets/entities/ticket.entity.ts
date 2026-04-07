@@ -5,11 +5,11 @@ export class Ticket {
   @PrimaryColumn({ type: 'varchar', length: 26 })
   id!: string;
 
-  @Column({ type: 'varchar', length: 128 })
-  player_id!: string;
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  player_id!: string | null;
 
-  @Column({ type: 'decimal', precision: 14, scale: 4 })
-  bet_amount!: string;
+  @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
+  bet_amount!: string | null;
 
   @Column({ type: 'decimal', precision: 14, scale: 4 })
   multiplier!: string;
@@ -23,8 +23,8 @@ export class Ticket {
   @Column({ type: 'varchar', length: 32 })
   win_tier!: string;
 
-  @Column({ type: 'decimal', precision: 18, scale: 4 })
-  payout!: string;
+  @Column({ type: 'decimal', precision: 18, scale: 4, nullable: true })
+  payout!: string | null;
 
   @Column({ type: 'jsonb' })
   w_numbers!: string[];
