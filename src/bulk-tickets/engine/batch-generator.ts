@@ -126,9 +126,9 @@ export async function generateBatchToCsv(opts: GenerateBatchOptions): Promise<{
       ',' +
       jsonCell(layout.near_miss_positions) +
       ',' +
-      jsonCell(layout.amount_layout.amounts) +
+      jsonCell(layout.amount_layout.amounts.map((m: number) => m * bet)) +
       ',' +
-      jsonCell(recipe.combination) +
+      jsonCell(recipe.combination.map((m: number) => m * bet)) +
       '\n';
 
     await write(row);

@@ -1,10 +1,4 @@
-import {
-  RECIPES,
-  BATCH_SIZE,
-  totalRecipeCount,
-  countsByWinTier,
-  assertRecipeTotals,
-} from './recipe-table';
+import { RECIPES, BATCH_SIZE, totalRecipeCount, countsByWinTier, assertRecipeTotals } from './recipe-table';
 
 assertRecipeTotals();
 
