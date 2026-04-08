@@ -13,16 +13,14 @@ function arg(name: string, fallback?: string): string {
 async function main(): Promise<void> {
   const bet = Number(arg('bet'));
   const batchId = Number(arg('batch-id'));
-  const seed = Number(arg('seed'));
   const size = Number(arg('size', '10000'));
   const outPath = arg('out');
 
-  console.log('[generate-batch] starting', { bet, batchId, seed, size, outPath });
+  console.log('[generate-batch] starting', { bet, batchId, size, outPath });
 
   const { rows, durationMs } = await generateBatchToCsv({
     bet,
     batchId,
-    seed,
     batchSize: size,
     outPath,
   });

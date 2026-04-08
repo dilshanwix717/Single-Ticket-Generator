@@ -3,16 +3,16 @@ import { mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import { once } from 'events';
 
+import { randomInt } from 'crypto';
+
 import { generateTicketLayout } from '../../tickets/engine/ticket-generator';
 import { RECIPES } from '../lookup/recipe-table';
 import { buildShuffledBag } from './bag-builder';
 import { buildNumericCode } from './numeric-code';
-import { mulberry32 } from './seeded-rng';
 
 export interface GenerateBatchOptions {
   bet: number;
   batchId: number;
-  seed: number;
   /** Defaults to 10,000,000 (full PRD batch). Lower for testing. */
   batchSize?: number;
   outPath: string;
@@ -32,7 +32,7 @@ const COLUMNS = [
   'hit_positions',
   'near_miss_positions',
   'amounts',
-  'tiers',
+  'combination',
 ] as const;
 
 /**
@@ -55,14 +55,10 @@ export async function generateBatchToCsv(opts: GenerateBatchOptions): Promise<{
   rows: number;
   durationMs: number;
 }> {
-  const {
-    bet,
-    batchId,
-    seed,
-    batchSize,
-    outPath,
-    header = true,
-  } = opts;
+  const { bet, batchId, batchSize, outPath, header = true } = opts;
+
+  // Fresh non-deterministic seed for the bag shuffle on every run.
+  const seed = randomInt(0, 0x100000000);
 
   const start = Date.now();
 
@@ -86,14 +82,8 @@ export async function generateBatchToCsv(opts: GenerateBatchOptions): Promise<{
     throw new Error(`batchSize ${limit} > bag length ${bag.length}`);
   }
 
-  // Make ticket-content generation deterministic by replacing Math.random
-  // with a seeded PRNG for the duration of the run. The existing
-  // ticket engine reads Math.random transitively via random.utils.
-  // Use a different seed derivation than the bag shuffle so the two
-  // sequences are independent.
-  const originalRandom = Math.random;
-  const contentRng = mulberry32((seed ^ 0x9e3779b9) >>> 0);
-  Math.random = (): number => contentRng() / 0x100000000;
+  // Ticket content uses the engine's own Math.random — non-deterministic
+  // by design so two runs produce different tickets.
 
   const wSetBuf: Set<string> = new Set();
 
@@ -138,13 +128,20 @@ export async function generateBatchToCsv(opts: GenerateBatchOptions): Promise<{
       ',' +
       jsonCell(layout.amount_layout.amounts) +
       ',' +
-      jsonCell(layout.amount_layout.tiers) +
+      jsonCell(recipe.combination) +
       '\n';
 
     await write(row);
-  }
 
-  Math.random = originalRandom;
+    if ((seq + 1) % 100_000 === 0) {
+      const elapsedSec = (Date.now() - start) / 1000;
+      const rate = Math.round((seq + 1) / elapsedSec);
+      const pct = (((seq + 1) / limit) * 100).toFixed(1);
+      const etaSec = Math.round((limit - (seq + 1)) / rate);
+      // eslint-disable-next-line no-console
+      console.log(`[generate-batch] ${seq + 1}/${limit} (${pct}%) — ${rate}/s — eta ${etaSec}s`);
+    }
+  }
 
   out.end();
   await once(out, 'finish');
